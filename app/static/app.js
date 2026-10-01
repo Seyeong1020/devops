@@ -195,6 +195,9 @@ async function selectSubscriber(userId) {
 
         const data = await res.json();
 
+        // 응답을 기다리는 사이 다른 사용자를 클릭했다면 이 응답은 버린다
+        if (selectedUserId !== userId) return;
+
         // BE 엔드포인트가 아직 구현되지 않은 단계(pass)에서는 null 이 반환된다
         if (data === null) {
             currentDevices = [];
@@ -207,6 +210,7 @@ async function selectSubscriber(userId) {
         currentDevices = Array.isArray(data) ? data : [];
         renderDevices();
     } catch (err) {
+        if (selectedUserId !== userId) return;
         console.error("Failed to fetch devices:", err);
         currentDevices = [];
         tableEl.classList.add("hidden");
@@ -325,6 +329,9 @@ async function selectDevice(deviceId) {
 
         const data = await res.json();
 
+        // 응답을 기다리는 사이 다른 가전(또는 다른 사용자)을 클릭했다면 이 응답은 버린다
+        if (selectedDeviceId !== deviceId) return;
+
         // BE 엔드포인트가 아직 구현되지 않은 단계(pass)에서는 null 이 반환된다
         if (data === null) {
             usageDetail.classList.add("hidden");
@@ -362,6 +369,7 @@ async function selectDevice(deviceId) {
         // 6. 주간 사용량 차트
         renderUsageChart(data.weeklyUsageTrend);
     } catch (err) {
+        if (selectedDeviceId !== deviceId) return;
         console.error("Failed to fetch usage:", err);
         usageDetail.classList.add("hidden");
         usageInfo.innerHTML = "";
