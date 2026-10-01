@@ -11,7 +11,7 @@ let usageChart = null;
 // =============================================================================
 // 공통 유틸
 // =============================================================================
-// XSS 방지 및 HTML 깨짐 방지를 위한 간단한 이스케이프 처리
+// HTML 특수문자 escape (XSS 방지 + 깨짐 방지)
 function escapeHtml(value) {
     return String(value === null || value === undefined ? "" : value)
         .replace(/&/g, "&amp;")
@@ -21,63 +21,48 @@ function escapeHtml(value) {
         .replace(/'/g, "&#39;");
 }
 
-// 테이블 본문에 "결과 없음" 한 줄을 표시
-function renderEmptyRow(tbody, colspan, message) {
-    tbody.innerHTML =
-        '<tr><td colspan="' + colspan + '" class="empty-msg">' +
-        escapeHtml(message) +
-        "</td></tr>";
-}
-
-// 검색어가 주어진 필드들 중 하나라도 부분 매칭되는지 확인
-function matchesSearch(fields, search) {
-    if (!search) return true;
-    return fields.some(function (field) {
-        return String(field || "").toLowerCase().includes(search);
-    });
-}
-
 
 // =============================================================================
 // [요구사항 #3] 상태 기반 Badge 스타일
 // =============================================================================
+// 상태 값(value)에 따라 적절한 CSS 클래스를 반환한다.
+// 적용 위치: 구독 상태, 가전 상태, 전원 상태(Power), 건강 상태(Health)
+// 대소문자 구분 없이 매핑되며, 매핑되지 않는 값은 기본 "badge" 스타일.
+//
 function badgeClass(value) {
     const v = (value || "").toLowerCase();
 
-    // 매핑 규칙:
     // Active, Online, Normal   → "badge status-active"   (초록)
-    // Paused, Standby          → "badge status-paused"   (파랑)
-    // Expired, Error, Warning  → "badge status-expired"  (빨강)
-    // Offline                  → "badge status-offline"  (회색)
-    // On, Cleaning             → "badge status-on"       (노랑)
-    // Off                      → "badge status-off"      (연회색)
-    // 그 외                     → "badge"
     if (v === "active" || v === "online" || v === "normal") {
         return "badge status-active";
     }
+    // Paused, Standby          → "badge status-paused"   (파랑)
     if (v === "paused" || v === "standby") {
         return "badge status-paused";
     }
+    // Expired, Error, Warning  → "badge status-expired"  (빨강)
     if (v === "expired" || v === "error" || v === "warning") {
         return "badge status-expired";
     }
+    // Offline                  → "badge status-offline"  (회색)
     if (v === "offline") {
         return "badge status-offline";
     }
+    // On, Cleaning             → "badge status-on"       (노랑)
     if (v === "on" || v === "cleaning") {
         return "badge status-on";
     }
+    // Off                      → "badge status-off"      (연회색)
     if (v === "off") {
         return "badge status-off";
     }
+    // 그 외
     return "badge";
 }
 
-// 상태 값을 Badge HTML로 변환
+// 상태 값을 badge <span> HTML로 변환
 function badgeHtml(value) {
-    return (
-        '<span class="' + badgeClass(value) + '">' + escapeHtml(value) + "</span>"
-    );
+    return `<span class="${badgeClass(value)}">${escapeHtml(value)}</span>`;
 }
 
 
@@ -85,82 +70,71 @@ function badgeHtml(value) {
 // [요구사항 #1] 구독 사용자 조회 + 검색/필터
 // =============================================================================
 
-// GET /api/subscribers 호출 → subscribers 저장 → 렌더링
+// [요구사항 #1-A] GET /api/subscribers 호출
+//
 async function fetchSubscribers() {
-    const tbody = document.getElementById("subscriber-body");
-
     try {
+        // 1. GET /api/subscribers 호출
         const res = await fetch("/api/subscribers");
         if (!res.ok) {
-            throw new Error("HTTP " + res.status);
+            throw new Error(`HTTP ${res.status}`);
         }
 
-        const data = await res.json();
-
-        // BE 엔드포인트가 아직 구현되지 않은 단계(pass)에서는 null 이 반환된다
-        if (data === null) {
-            subscribers = [];
-            renderEmptyRow(tbody, 5, "Subscribers API is not ready yet.");
-            return;
-        }
-
-        subscribers = Array.isArray(data) ? data : [];
-        renderSubscribers();
+        // 2. 응답을 subscribers 변수에 저장
+        subscribers = await res.json();
     } catch (err) {
         console.error("Failed to fetch subscribers:", err);
         subscribers = [];
-        renderEmptyRow(tbody, 5, "Failed to load subscribers.");
     }
+
+    // 3. renderSubscribers() 호출
+    renderSubscribers();
 }
 
-// subscribers 배열을 검색/필터 적용하여 테이블에 렌더링
+// [요구사항 #1-B] subscribers 배열을 테이블에 렌더링
+//
 function renderSubscribers() {
     const tbody = document.getElementById("subscriber-body");
     const search = document.getElementById("subscriber-search").value.toLowerCase();
     const statusFilter = document.getElementById("subscriber-status-filter").value;
 
-    // 1. 검색어와 상태 필터 적용
-    const filtered = subscribers.filter(function (user) {
-        const matchSearch = matchesSearch(
-            [user.name, user.plan, user.status, user.userId],
-            search
-        );
-        const matchStatus = !statusFilter || user.status === statusFilter;
-        return matchSearch && matchStatus;
+    // 1~2. 검색어 + 상태 필터로 subscribers 배열 필터링
+    const filtered = subscribers.filter((user) => {
+        const matchesSearch =
+            (user.name || "").toLowerCase().includes(search) ||
+            (user.plan || "").toLowerCase().includes(search) ||
+            (user.status || "").toLowerCase().includes(search) ||
+            (user.userId || "").toLowerCase().includes(search);
+
+        const matchesStatus = !statusFilter || user.status === statusFilter;
+
+        return matchesSearch && matchesStatus;
     });
 
-    // 2. 결과가 없는 경우 안내 메시지
-    if (subscribers.length === 0) {
-        renderEmptyRow(tbody, 5, "No subscribers.");
-        return;
-    }
+    // 3. <tbody>에 <tr> 렌더링
     if (filtered.length === 0) {
-        renderEmptyRow(tbody, 5, "No subscribers matched.");
+        tbody.innerHTML =
+            '<tr><td colspan="5" class="empty-msg">No subscribers matched.</td></tr>';
         return;
     }
 
-    // 3. 행 렌더링 (선택된 행에 selected 클래스)
     tbody.innerHTML = filtered
-        .map(function (user) {
-            const isSelected = user.userId === selectedUserId;
-            return (
-                '<tr class="clickable' + (isSelected ? " selected" : "") + '"' +
-                ' data-user-id="' + escapeHtml(user.userId) + '">' +
-                "<td>" + escapeHtml(user.userId) + "</td>" +
-                "<td>" + escapeHtml(user.name) + "</td>" +
-                "<td>" + escapeHtml(user.plan) + "</td>" +
-                "<td>" + badgeHtml(user.status) + "</td>" +
-                "<td>" + escapeHtml(user.deviceCount) + "</td>" +
-                "</tr>"
-            );
+        .map((user) => {
+            const selected = user.userId === selectedUserId ? " selected" : "";
+            return `
+                <tr class="clickable${selected}" data-user-id="${escapeHtml(user.userId)}">
+                    <td>${escapeHtml(user.userId)}</td>
+                    <td>${escapeHtml(user.name)}</td>
+                    <td>${escapeHtml(user.plan)}</td>
+                    <td>${badgeHtml(user.status)}</td>
+                    <td>${escapeHtml(user.deviceCount)}</td>
+                </tr>`;
         })
         .join("");
 
-    // 4. 행 클릭 시 해당 사용자 선택
-    tbody.querySelectorAll("tr[data-user-id]").forEach(function (row) {
-        row.addEventListener("click", function () {
-            selectSubscriber(row.dataset.userId);
-        });
+    // 각 행 클릭 시 selectSubscriber(userId) 호출
+    tbody.querySelectorAll("tr[data-user-id]").forEach((row) => {
+        row.addEventListener("click", () => selectSubscriber(row.dataset.userId));
     });
 }
 
@@ -169,62 +143,42 @@ function renderSubscribers() {
 // [요구사항 #2] 사용자별 가전 목록 + 사용 현황 + 차트
 // =============================================================================
 
-// 사용자 클릭 → 해당 사용자의 가전 목록 조회
+// [요구사항 #2-A] 사용자 클릭 시 해당 사용자의 가전 목록 조회
+//
 async function selectSubscriber(userId) {
-    // 1. 선택 상태 갱신
+    // 1. selectedUserId 업데이트, selectedDeviceId 초기화
     selectedUserId = userId;
     selectedDeviceId = null;
 
-    // 2. 선택 표시 반영
+    // 2. 선택 상태 반영
     renderSubscribers();
 
     // 3. 이전 사용 현황 초기화
     resetUsageDetail();
 
-    // 4. 가전 목록 조회
-    const emptyEl = document.getElementById("device-empty");
-    const tableEl = document.getElementById("device-table");
-
+    // 4. GET /api/subscribers/{userId}/devices 호출
     try {
-        const res = await fetch(
-            "/api/subscribers/" + encodeURIComponent(userId) + "/devices"
-        );
+        const res = await fetch(`/api/subscribers/${encodeURIComponent(userId)}/devices`);
         if (!res.ok) {
-            throw new Error("HTTP " + res.status);
+            throw new Error(`HTTP ${res.status}`);
         }
 
-        const data = await res.json();
-
-        // BE 엔드포인트가 아직 구현되지 않은 단계(pass)에서는 null 이 반환된다
-        if (data === null) {
-            currentDevices = [];
-            tableEl.classList.add("hidden");
-            emptyEl.classList.remove("hidden");
-            emptyEl.textContent = "Devices API is not ready yet.";
-            return;
-        }
-
-        currentDevices = Array.isArray(data) ? data : [];
-        renderDevices();
+        // 5. currentDevices에 저장
+        currentDevices = await res.json();
     } catch (err) {
         console.error("Failed to fetch devices:", err);
         currentDevices = [];
-        tableEl.classList.add("hidden");
-        emptyEl.classList.remove("hidden");
-        emptyEl.textContent = "Failed to load devices.";
     }
+
+    // 6. 가전 Table 렌더링
+    renderDevices();
 }
 
-// 사용 현황 패널 초기화
+// 사용 현황 영역 초기화
 function resetUsageDetail() {
-    const usageEmpty = document.getElementById("usage-empty");
-    const usageDetail = document.getElementById("usage-detail");
-    const usageInfo = document.getElementById("usage-info");
-
-    usageEmpty.textContent = "Select a device to view usage details.";
-    usageEmpty.classList.remove("hidden");
-    usageDetail.classList.add("hidden");
-    usageInfo.innerHTML = "";
+    document.getElementById("usage-empty").classList.remove("hidden");
+    document.getElementById("usage-detail").classList.add("hidden");
+    document.getElementById("usage-info").innerHTML = "";
 
     if (usageChart) {
         usageChart.destroy();
@@ -232,7 +186,8 @@ function resetUsageDetail() {
     }
 }
 
-// currentDevices 배열을 검색/필터 적용하여 테이블에 렌더링
+// [요구사항 #2-B] currentDevices 배열을 테이블에 렌더링
+//
 function renderDevices() {
     const emptyEl = document.getElementById("device-empty");
     const tableEl = document.getElementById("device-table");
@@ -240,147 +195,134 @@ function renderDevices() {
     const search = document.getElementById("device-search").value.toLowerCase();
     const statusFilter = document.getElementById("device-status-filter").value;
 
-    // 사용자를 아직 선택하지 않은 상태
+    // 아직 구독자를 선택하지 않은 경우
     if (!selectedUserId) {
-        tbody.innerHTML = "";
-        tableEl.classList.add("hidden");
-        emptyEl.classList.remove("hidden");
         emptyEl.textContent = "Select a subscriber to view devices.";
+        emptyEl.classList.remove("hidden");
+        tableEl.classList.add("hidden");
+        tbody.innerHTML = "";
         return;
     }
 
-    // 1. 검색어 + 상태 필터 적용
-    const filtered = currentDevices.filter(function (device) {
-        const matchSearch = matchesSearch(
-            [device.type, device.model, device.status, device.deviceId, device.location],
-            search
-        );
-        const matchStatus = !statusFilter || device.status === statusFilter;
-        return matchSearch && matchStatus;
+    // 등록된 가전 자체가 없는 경우
+    if (currentDevices.length === 0) {
+        emptyEl.textContent = "No registered devices.";
+        emptyEl.classList.remove("hidden");
+        tableEl.classList.add("hidden");
+        tbody.innerHTML = "";
+        return;
+    }
+
+    // 1~2. 검색어 + 상태 필터로 currentDevices 배열 필터링
+    const filtered = currentDevices.filter((device) => {
+        const matchesSearch =
+            (device.type || "").toLowerCase().includes(search) ||
+            (device.model || "").toLowerCase().includes(search) ||
+            (device.status || "").toLowerCase().includes(search) ||
+            (device.deviceId || "").toLowerCase().includes(search) ||
+            (device.location || "").toLowerCase().includes(search);
+
+        const matchesStatus = !statusFilter || device.status === statusFilter;
+
+        return matchesSearch && matchesStatus;
     });
 
-    // 2. 등록 가전이 없는 경우 / 필터 결과가 없는 경우
-    if (currentDevices.length === 0) {
-        tbody.innerHTML = "";
-        tableEl.classList.add("hidden");
-        emptyEl.classList.remove("hidden");
-        emptyEl.textContent = "No registered devices";
-        return;
-    }
+    // 3. 필터 결과가 없는 경우
     if (filtered.length === 0) {
-        tbody.innerHTML = "";
-        tableEl.classList.add("hidden");
+        emptyEl.textContent = "No devices matched.";
         emptyEl.classList.remove("hidden");
-        emptyEl.textContent = "No devices matched";
+        tableEl.classList.add("hidden");
+        tbody.innerHTML = "";
         return;
     }
 
-    // 3. 결과가 있으면 테이블 표시
+    // 결과가 있으면 Table 표시
     emptyEl.classList.add("hidden");
     tableEl.classList.remove("hidden");
 
-    // 4. 행 렌더링
+    // 4. <tbody> 렌더링
     tbody.innerHTML = filtered
-        .map(function (device) {
-            const isSelected = device.deviceId === selectedDeviceId;
-            return (
-                '<tr class="clickable' + (isSelected ? " selected" : "") + '"' +
-                ' data-device-id="' + escapeHtml(device.deviceId) + '">' +
-                "<td>" + escapeHtml(device.deviceId) + "</td>" +
-                "<td>" + escapeHtml(device.type) + "</td>" +
-                "<td>" + escapeHtml(device.model) + "</td>" +
-                "<td>" + escapeHtml(device.location) + "</td>" +
-                "<td>" + badgeHtml(device.status) + "</td>" +
-                "</tr>"
-            );
+        .map((device) => {
+            const selected = device.deviceId === selectedDeviceId ? " selected" : "";
+            return `
+                <tr class="clickable${selected}" data-device-id="${escapeHtml(device.deviceId)}">
+                    <td>${escapeHtml(device.deviceId)}</td>
+                    <td>${escapeHtml(device.type)}</td>
+                    <td>${escapeHtml(device.model)}</td>
+                    <td>${escapeHtml(device.location)}</td>
+                    <td>${badgeHtml(device.status)}</td>
+                </tr>`;
         })
         .join("");
 
-    // 5. 행 클릭 시 해당 가전 선택
-    tbody.querySelectorAll("tr[data-device-id]").forEach(function (row) {
-        row.addEventListener("click", function () {
-            selectDevice(row.dataset.deviceId);
-        });
+    // 5. 각 행 클릭 시 selectDevice(deviceId) 호출
+    tbody.querySelectorAll("tr[data-device-id]").forEach((row) => {
+        row.addEventListener("click", () => selectDevice(row.dataset.deviceId));
     });
 }
 
-// 가전 클릭 → 상세 사용 현황 조회
+// [요구사항 #2-C] 가전 클릭 시 상세 사용 현황 조회
+//
 async function selectDevice(deviceId) {
-    // 1. 선택 상태 갱신 + 2. 선택 표시 반영
+    // 1. selectedDeviceId 업데이트
     selectedDeviceId = deviceId;
+
+    // 2. 선택 상태 반영
     renderDevices();
 
-    const usageEmpty = document.getElementById("usage-empty");
-    const usageDetail = document.getElementById("usage-detail");
-    const usageInfo = document.getElementById("usage-info");
-
+    // 3. GET /api/devices/{deviceId}/usage 호출
+    let data;
     try {
-        // 3. 사용 현황 조회
-        const res = await fetch(
-            "/api/devices/" + encodeURIComponent(deviceId) + "/usage"
-        );
+        const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/usage`);
         if (!res.ok) {
-            throw new Error("HTTP " + res.status);
+            throw new Error(`HTTP ${res.status}`);
         }
-
-        const data = await res.json();
-
-        // BE 엔드포인트가 아직 구현되지 않은 단계(pass)에서는 null 이 반환된다
-        if (data === null) {
-            usageDetail.classList.add("hidden");
-            usageInfo.innerHTML = "";
-            usageEmpty.classList.remove("hidden");
-            usageEmpty.textContent = "Usage API is not ready yet.";
-            return;
-        }
-
-        // 4. 빈 메시지 숨기고 상세 영역 표시
-        usageEmpty.classList.add("hidden");
-        usageDetail.classList.remove("hidden");
-
-        // 5. 상세 정보 렌더링
-        const rows = [
-            ["Device ID", escapeHtml(data.deviceId)],
-            ["Device Name", escapeHtml(data.deviceName)],
-            ["Power Status", badgeHtml(data.powerStatus)],
-            ["Last Used", escapeHtml(data.lastUsedAt)],
-            ["Total Usage", escapeHtml(data.totalUsageHours) + " hrs"],
-            ["Weekly Count", escapeHtml(data.weeklyUsageCount)],
-            ["Health Status", badgeHtml(data.healthStatus)],
-            ["Remark", escapeHtml(data.remark)],
-        ];
-
-        usageInfo.innerHTML = rows
-            .map(function (row) {
-                return (
-                    '<div class="label">' + row[0] + "</div>" +
-                    '<div class="value">' + row[1] + "</div>"
-                );
-            })
-            .join("");
-
-        // 6. 주간 사용량 차트
-        renderUsageChart(data.weeklyUsageTrend);
+        data = await res.json();
     } catch (err) {
         console.error("Failed to fetch usage:", err);
-        usageDetail.classList.add("hidden");
-        usageInfo.innerHTML = "";
-        usageEmpty.classList.remove("hidden");
-        usageEmpty.textContent = "Failed to load usage details.";
+        resetUsageDetail();
+        document.getElementById("usage-empty").textContent =
+            "Failed to load usage detail.";
+        return;
     }
+
+    // 4. usage-empty 숨기기, usage-detail 표시
+    document.getElementById("usage-empty").classList.add("hidden");
+    document.getElementById("usage-detail").classList.remove("hidden");
+
+    // 5. usage-info에 상세 정보 렌더링
+    const rows = [
+        ["Device ID", escapeHtml(data.deviceId)],
+        ["Device Name", escapeHtml(data.deviceName)],
+        ["Power Status", badgeHtml(data.powerStatus)],
+        ["Last Used", escapeHtml(data.lastUsedAt)],
+        ["Total Usage", `${escapeHtml(data.totalUsageHours)} hrs`],
+        ["Weekly Count", escapeHtml(data.weeklyUsageCount)],
+        ["Health Status", badgeHtml(data.healthStatus)],
+        ["Remark", escapeHtml(data.remark)],
+    ];
+
+    document.getElementById("usage-info").innerHTML = rows
+        .map(
+            ([label, value]) =>
+                `<div class="label">${label}</div><div class="value">${value}</div>`
+        )
+        .join("");
+
+    // 6. 주간 사용량 Bar Chart 렌더링
+    renderUsageChart(data.weeklyUsageTrend);
 }
 
-// Chart.js 주간 사용량 Bar Chart
+// [요구사항 #2-D] Chart.js 주간 사용량 Bar Chart
+//
 function renderUsageChart(trend) {
     const ctx = document.getElementById("usageChart");
 
-    // 1. 기존 차트 제거 (캔버스 재사용 시 중복 렌더링 방지)
+    // 1. 기존 차트가 있으면 destroy()
     if (usageChart) {
         usageChart.destroy();
         usageChart = null;
     }
-
-    const data = Array.isArray(trend) ? trend : [];
 
     // 2. 새 차트 생성
     usageChart = new Chart(ctx, {
@@ -390,26 +332,16 @@ function renderUsageChart(trend) {
             datasets: [
                 {
                     label: "Weekly Usage Trend",
-                    data: data,
-                    backgroundColor: "#1f3c88",
-                    borderRadius: 6,
-                    maxBarThickness: 32,
+                    data: trend || [],
+                    backgroundColor: "#93c5fd",
+                    borderColor: "#1f3c88",
+                    borderWidth: 1,
                 },
             ],
         },
         options: {
             responsive: true,
             maintainAspectRatio: true,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: function (item) {
-                            return item.parsed.y + " times";
-                        },
-                    },
-                },
-            },
             scales: {
                 y: {
                     beginAtZero: true,
@@ -436,5 +368,5 @@ function bindEvents() {
 
 bindEvents();
 
-// [요구사항 #1] 초기 로딩
+// [요구사항 #1] 대시보드 진입 시 구독자 목록 자동 조회
 fetchSubscribers();
